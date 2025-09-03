@@ -15,7 +15,7 @@ _llms = {}
 # Gemini
 gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
 if gemini_key:
-    from api.llm_gemini import GeminiLLM  # import perezoso
+    from api.llm_gemini import GeminiLLM  
     _llms["gemini"] = GeminiLLM(
         api_key=gemini_key,
         model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
@@ -24,7 +24,7 @@ if gemini_key:
 # OpenAI
 openai_key = os.getenv("OPENAI_API_KEY")
 if openai_key:
-    from api.llm_openai import OpenAILLM  # import perezoso
+    from api.llm_openai import OpenAILLM  
     _llms["openai"] = OpenAILLM(
         api_key=openai_key,
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
@@ -33,7 +33,7 @@ if openai_key:
 # DeepSeek
 deepseek_key = os.getenv("DEEPSEEK_API_KEY")
 if deepseek_key:
-    from api.llm_deepseek import DeepSeekLLM  # import perezoso
+    from api.llm_deepseek import DeepSeekLLM  
     _llms["deepseek"] = DeepSeekLLM(
         api_key=deepseek_key,
         model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
@@ -49,13 +49,27 @@ _service = ConversationService(store=_store, llms=_llms, default_provider=defaul
 def conversation(
     payload: ConversationIn,
     x_llm_provider: str | None = Header(default=None, alias="X-LLM-Provider"),
+    x_stance: str | None = Header(default=None, alias="X-Stance"),
 ):
-    chosen = x_llm_provider
+    provider = None
+    stance_hint = None
+
+    if payload.conversation_id is None:
+        if x_llm_provider:
+            provider = x_llm_provider.strip().lower()
+
+        if x_stance:
+            s = x_stance.strip().lower()
+            if s not in {"pro", "contra"}:
+                raise HTTPException(status_code=400, detail="invalid stance; must be 'pro' or 'contra'")
+            stance_hint = s
+
     try:
         cid, hist = _service.handle(
             payload.conversation_id,
             payload.message,
-            provider=chosen if payload.conversation_id is None else None,  # solo en el primer turno
+            provider=provider,
+            stance=stance_hint,
         )
     except ConversationNotFound:
         raise HTTPException(status_code=404, detail="conversation not found")
@@ -73,5 +87,5 @@ def get_conversation(conversation_id: str):
     state = _store.get(conversation_id)
     if not state:
         raise HTTPException(status_code=404, detail="conversation not found")
-    hist = state["history"][-10:]  # últimos 5 pares
+    hist = state["history"][-10:]  
     return ConversationOut(conversation_id=conversation_id, message=[MessageItem(**m) for m in hist])
