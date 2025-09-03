@@ -1,6 +1,13 @@
 from typing import List, Dict, Tuple
 import re
 from openai import OpenAI
+import openai as openai_pkg
+
+
+from api.errors import (
+    ProviderError, RateLimited, AuthError, PermissionError,
+    BadRequestError, UpstreamTimeout, Unavailable, UpstreamNetwork,
+)
 
 SYSTEM_TEMPLATE = (
     "Role: debate bot.\n"
@@ -42,26 +49,56 @@ class OpenAILLM:
             msgs.append({"role": role, "content": m["message"]})
         msgs.append({"role": "user", "content": user_msg})
 
-        body = ""
-        for _ in range(2):
-            comp = self.client.chat.completions.create(
-                model=self.model,
-                messages=msgs,
-                temperature=0.2,
-                max_tokens=256,
-                timeout=30,
-            )
-            text = (comp.choices[0].message.content or "").strip()
-            body, ok = _strip_tag_and_check(text, stance)
-            if ok:
-                return body.strip()
+        try:
+            body = ""
+            for _ in range(2):
+                comp = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=msgs,
+                    temperature=0.5,
+                    max_tokens=256,
+                    timeout=30,
+                )
+                text = (comp.choices[0].message.content or "").strip()
+                body, ok = _strip_tag_and_check(text, stance)
+                if ok:
+                    return body.strip()
 
-            msgs.append({
-                "role": "user",
-                "content": (
-                    f"Your previous reply did not strictly defend '{stance}' or the marker was invalid. "
-                    f"Rewrite starting with [[STANCE:{stance}]] and keep it under 180 words, in Spanish."
-                ),
-            })
+                msgs.append({
+                    "role": "user",
+                    "content": (
+                        f"Your previous reply did not strictly defend '{stance}' or the marker was invalid. "
+                        f"Rewrite starting with [[STANCE:{stance}]] and keep it under 180 words, in Spanish."
+                    ),
+                })
+            return body.strip()
 
-        return body.strip()
+        except openai_pkg.RateLimitError as e:
+            raise RateLimited(str(e))
+        except openai_pkg.AuthenticationError as e:
+            raise AuthError(str(e))
+        except openai_pkg.PermissionDeniedError as e:
+            raise PermissionError(str(e))
+        except openai_pkg.BadRequestError as e:
+            raise BadRequestError(str(e))
+        except openai_pkg.APITimeoutError as e:
+            raise UpstreamTimeout(str(e))
+        except openai_pkg.APIConnectionError as e:
+            raise UpstreamNetwork(str(e))
+        except openai_pkg.APIStatusError as e:
+            sc = getattr(e, "status_code", None)
+            if sc == 429:
+                raise RateLimited(str(e))
+            if sc == 401:
+                raise AuthError(str(e))
+            if sc == 403:
+                raise PermissionError(str(e))
+            if sc in (500, 502):
+                raise Unavailable(str(e))
+            if sc == 503:
+                raise Unavailable(str(e))
+            if sc == 504:
+                raise UpstreamTimeout(str(e))
+            raise ProviderError(str(e))
+        except Exception as e:
+            raise ProviderError(str(e))

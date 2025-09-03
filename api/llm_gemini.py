@@ -1,6 +1,15 @@
 from typing import List, Dict, Tuple
 import re
 import google.generativeai as genai
+from google.api_core import exceptions as gax
+
+from api.errors import (
+    ProviderError, RateLimited, AuthError, PermissionError,
+    BadRequestError, UpstreamTimeout, Unavailable, UpstreamNetwork,
+)
+
+
+
 
 SYSTEM_TEMPLATE = (
     "Role: debate bot.\n"
@@ -44,24 +53,45 @@ class GeminiLLM:
             contents.append({"role": role, "parts": [m["message"]]})
         contents.append({"role": "user", "parts": [user_msg]})
 
-        body = ""
-        for _ in range(2):
-            resp = self.model.generate_content(
-                contents,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.2,
-                    max_output_tokens=256,
-                ),
-            )
-            text = (resp.text or "").strip()
-            body, ok = _strip_tag_and_check(text, stance)
-            if ok:
-                return body.strip()
+        try:
+            body = ""
+            for _ in range(2):
+                resp = self.model.generate_content(
+                    contents,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.5,
+                        max_output_tokens=256,
+                    ),
+                )
+                text = (resp.text or "").strip()
+                body, ok = _strip_tag_and_check(text, stance)
+                if ok:
+                    return body.strip()
 
-            contents.append({
-                "role": "user",
-                "parts": [f"Your reply used an invalid/wrong marker. "
-                          f"Rewrite starting with [[STANCE:{stance}]] and keep it under 180 words, in Spanish."],
-            })
+                contents.append({
+                    "role": "user",
+                    "parts": [f"Your reply used an invalid/wrong marker. "
+                              f"Rewrite starting with [[STANCE:{stance}]] and keep it under 180 words, in Spanish."],
+                })
+            return body.strip()
 
-        return body.strip()
+        # —— error mapping (google / gemini) ——
+        except genai.types.BlockedPromptException as e:
+            raise BadRequestError(str(e))
+        except gax.ResourceExhausted as e:  # quota / rate
+            raise RateLimited(str(e))
+        except gax.DeadlineExceeded as e:   # timeout
+            raise UpstreamTimeout(str(e))
+        except gax.Unauthenticated as e:
+            raise AuthError(str(e))
+        except gax.PermissionDenied as e:
+            raise PermissionError(str(e))
+        except gax.InvalidArgument as e:
+            raise BadRequestError(str(e))
+        except gax.ServiceUnavailable as e:
+            raise Unavailable(str(e))
+        except gax.GoogleAPICallError as e:
+            # includes InternalServerError, NotFound, etc.
+            raise ProviderError(str(e))
+        except Exception as e:
+            raise ProviderError(str(e))
