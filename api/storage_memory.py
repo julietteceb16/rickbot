@@ -3,7 +3,8 @@ from typing import Dict, List, Optional, TypedDict
 
 class ConversationState(TypedDict):
     topic: str
-    stance: str #checar
+    stance: str 
+    provider: str
     history: List[Dict]
 
 class InMemoryConversationStore:

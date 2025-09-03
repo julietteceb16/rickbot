@@ -12,3 +12,4 @@ class MessageItem(BaseModel):
 class ConversationOut(BaseModel):
     conversation_id: str
     message: List[MessageItem]
+   
