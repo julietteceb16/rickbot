@@ -7,9 +7,22 @@ from api.storage_memory import InMemoryConversationStore
 from api.services import ConversationService, ConversationNotFound
 
 load_dotenv()
-app = FastAPI()
+app = FastAPI(title="Debate Bot API")
 
-_store = InMemoryConversationStore()
+use_db = os.getenv("USE_DB", "0") == "1"
+
+if use_db:
+    from api.persistence.storage_db import DBConversationStore
+    from api.persistence.db import engine
+    from api.persistence.models import Base
+
+    Base.metadata.create_all(bind=engine)
+    _store = DBConversationStore()
+else:
+    from api.storage_memory import InMemoryConversationStore
+    _store = InMemoryConversationStore()
+
+
 _llms = {}
 
 # Gemini
