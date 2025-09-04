@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      USE_DB: "${USE_DB:-1}"
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////app/data/conversations.db}"
+    volumes:
+      - ./data/conversations.db:/app/conversations.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

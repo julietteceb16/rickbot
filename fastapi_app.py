@@ -118,7 +118,9 @@ def conversation(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "providers": list(_llms.keys()), "default": default_provider}
+    storage = "db" if use_db else "memory"
+    return {"status": "ok", "providers": list(_llms.keys()), "default": default_provider, "storage": storage}
+
 
 @app.get("/conversation/{conversation_id}", response_model=ConversationOut)
 def get_conversation(conversation_id: str):

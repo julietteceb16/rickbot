@@ -1,0 +1,28 @@
+cat > .dockerignore << 'EOF'
+# entornos locales / basura
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
+
+# git y builds
+.git/
+.gitignore
+build/
+dist/
+*.tar.gz
+
+# logs y DBs locales
+*.log
+*.sqlite
+*.db
+conversations.db
+
+# secrets locales (se pasan por docker-compose con env_file)
+.env
+.env.*
+
+# dependencias de frontend por si acaso
+node_modules/
+EOF
