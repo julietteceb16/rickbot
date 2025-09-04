@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kopi Challenge – Minimal App Shell</title>
+  <style>
+    :root { --bg:#0f172a; --fg:#e5e7eb; --muted:#94a3b8; --card:#111827; --accent:#38bdf8; }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--fg)}
+    header{padding:16px 20px;border-bottom:1px solid #1f2937;display:flex;gap:12px;align-items:center}
+    header h1{font-size:16px;margin:0;font-weight:600;color:var(--fg)}
+    .container{max-width:920px;margin:0 auto;padding:20px;display:grid;gap:16px}
+    .card{background:var(--card);border:1px solid #1f2937;border-radius:14px;padding:16px}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input,select,textarea,button{width:100%;border-radius:10px;border:1px solid #1f2937;background:#0b1220;color:var(--fg);padding:12px}
+    input::placeholder,textarea::placeholder{color:#718096}
+    button{background:linear-gradient(180deg,#0ea5e9,#0284c7);border:none;cursor:pointer;font-weight:600}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .row{display:grid;gap:12px}
+    @media (min-width:720px){.row{grid-template-columns:1fr 1fr}}
+    .small{font-size:12px;color:var(--muted)}
+    .history{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;padding-right:6px}
+    .msg{padding:12px;border-radius:12px;border:1px solid #1f2937}
+    .user{background:#0b1220}
+    .bot{background:#0a1f2e}
+    .meta{font-size:11px;color:var(--muted);margin-bottom:6px}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#0b1220;border:1px solid #1f2937;color:var(--muted);font-size:11px;margin-left:8px}
+    .row-3{display:grid;gap:12px;grid-template-columns:1fr auto}
+    .right{display:flex;gap:8px}
+    .hint{margin-top:6px}
+    .sep{height:1px;background:#1f2937;margin:8px 0}
+    .pill{font-size:11px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Kopi Challenge – Minimal App Shell</h1>
+    <span class="badge" id="conv-badge">No conversation</span>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="row">
+        <div>
+          <label>API Base URL</label>
+          <input id="apiBase" placeholder="e.g. http://localhost:8000" />
+          <div class="hint small">Your service must expose <code>POST /conversation</code> and <code>GET /health</code>.</div>
+        </div>
+        <div>
+          <label>Health Check</label>
+          <div class="row-3">
+            <input id="healthOut" disabled placeholder="status will appear here" />
+            <div class="right">
+              <button id="btnHealth">Ping</button>
+              <button id="btnReset" title="Forget conversation and start over" style="background:linear-gradient(180deg,#ef4444,#dc2626)">Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>LLM Provider (first turn only)</label>
+          <select id="provider">
+            <option value="">(use server default)</option>
+            <option value="gemini">gemini</option>
+            <option value="openai">openai</option>
+            <option value="deepseek">deepseek</option>
+          </select>
+          <div class="small">If empty, the server picks its default provider.</div>
+        </div>
+        <div>
+          <label>Stance (first turn only)</label>
+          <select id="stance">
+            <option value="">(server decides)</option>
+            <option value="pro">pro</option>
+            <option value="contra">contra</option>
+          </select>
+        </div>
+      </div>
+     
+    </section>
+
+    <section class="card">
+      <label>Message</label>
+      <div class="row-3">
+        <textarea id="msg" rows="3" placeholder="Type your message (first send starts a new conversation)"></textarea>
+        <div class="right">
+          <button id="btnSend">Send</button>
+        </div>
+      </div>
+      <div class="hint small">Tip: your backend fixes topic & stance on the very first request (no <code>conversation_id</code>).</div>
+    </section>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0;font-size:14px">Conversation</h2>
+        <span class="pill" id="latency">latency: –</span>
+      </div>
+      <div class="sep"></div>
+      <div id="history" class="history"></div>
+    </section>
+  </main>
+
+  <script>
+    const apiBase = document.getElementById('apiBase');
+    const healthOut = document.getElementById('healthOut');
+    const btnHealth = document.getElementById('btnHealth');
+    const btnReset = document.getElementById('btnReset');
+    const btnSend = document.getElementById('btnSend');
+    const msg = document.getElementById('msg');
+    const historyEl = document.getElementById('history');
+    const convBadge = document.getElementById('conv-badge');
+    const latency = document.getElementById('latency');
+
+    
+    const providerSel = document.getElementById('provider');
+    const stanceSel   = document.getElementById('stance');
+
+    let conversation_id = null;
+
+    function setBusy(isBusy){
+      btnSend.disabled = isBusy; btnHealth.disabled = isBusy; msg.disabled = isBusy;
+    }
+
+    function renderHistory(list){
+      historyEl.innerHTML = '';
+      list.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'msg ' + (item.role === 'user' ? 'user' : 'bot');
+        div.innerHTML = `<div class="meta">${item.role.toUpperCase()}</div>${escapeHtml(item.message)}`;
+        historyEl.appendChild(div);
+      });
+      historyEl.scrollTop = historyEl.scrollHeight;
+    }
+
+    function updateBadge(){
+      convBadge.textContent = conversation_id ? `Conversation: ${conversation_id}` : 'No conversation';
+    }
+
+    function escapeHtml(s){
+      return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    }
+
+    btnHealth.addEventListener('click', async () => {
+      if(!apiBase.value) return alert('Set API Base URL');
+      try{
+        const t0 = performance.now();
+        const res = await fetch(apiBase.value.replace(/\/$/, '') + '/health');
+        const t1 = performance.now();
+        const js = await res.json();
+        healthOut.value = JSON.stringify(js);
+        latency.textContent = `latency: ${Math.round(t1 - t0)} ms`;
+      }catch(err){ healthOut.value = 'health check failed'; }
+    });
+
+    btnReset.addEventListener('click', () => {
+      conversation_id = null; updateBadge(); renderHistory([]);
+      if (providerSel) { providerSel.disabled = false; providerSel.value = ''; }
+      if (stanceSel)   { stanceSel.disabled   = false; stanceSel.value   = ''; }
+    });
+
+    btnSend.addEventListener('click', async () => {
+      if(!apiBase.value) return alert('Set API Base URL');
+      const text = msg.value.trim();
+      if(!text) return;
+      setBusy(true);
+      try{
+        const t0 = performance.now();
+
+        const headers = { 'Content-Type': 'application/json' };
+        const firstTurn = !conversation_id;
+        if (firstTurn) {
+          if (providerSel && providerSel.value) headers['X-LLM-Provider'] = providerSel.value;
+          if (stanceSel && stanceSel.value)     headers['X-Stance']       = stanceSel.value;
+        }
+
+        const res = await fetch(apiBase.value.replace(/\/$/, '') + '/conversation', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ conversation_id, message: text })
+        });
+        const t1 = performance.now();
+        const js = await res.json();
+
+        const wasFirst = !conversation_id;
+        conversation_id = js.conversation_id || conversation_id;
+        updateBadge();
+        renderHistory(js.message || []);
+        latency.textContent = `latency: ${Math.round(t1 - t0)} ms`;
+        msg.value='';
+
+        if (wasFirst && conversation_id) {
+          if (providerSel) providerSel.disabled = true;
+          if (stanceSel)   stanceSel.disabled   = true;
+        }
+
+      }catch(err){
+        alert('Request failed. Check API Base URL / CORS / server logs.');
+      }finally{ setBusy(false); }
+    });
+
+    msg.addEventListener('keydown', e => {
+      if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); btnSend.click(); }
+    });
+
+      const params = new URLSearchParams(location.search);
+  if (params.get('api')) apiBase.value = params.get('api');
+
+  if (!apiBase.value) {
+    if (location.port === "8081") {
+      apiBase.value = "http://127.0.0.1:8000";
+    } else {
+      apiBase.value = location.origin;
+    }
+  }
+
+  updateBadge();
+  </script>
+</body>
+</html>

@@ -1,13 +1,38 @@
 import os
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
 from api.schemas import ConversationIn, ConversationOut, MessageItem
 from api.storage_memory import InMemoryConversationStore
 from api.services import ConversationService, ConversationNotFound
 
+
 load_dotenv()
+
 app = FastAPI(title="Debate Bot API")
+
+from fastapi.middleware.cors import CORSMiddleware
+
+ALLOWED_ORIGINS = [
+    "http://127.0.0.1:8081",
+    "http://localhost:8081",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],  
+)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/", include_in_schema=False)
+def root():
+    return FileResponse("static/index.html")
 
 use_db = os.getenv("USE_DB", "0") == "1"
 
@@ -102,3 +127,8 @@ def get_conversation(conversation_id: str):
         raise HTTPException(status_code=404, detail="conversation not found")
     hist = state["history"][-10:]  
     return ConversationOut(conversation_id=conversation_id, message=[MessageItem(**m) for m in hist])
+
+@app.get("/", include_in_schema=False)
+def root():
+    return FileResponse("static/index.html")
+

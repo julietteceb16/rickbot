@@ -8,9 +8,6 @@ from api.errors import (
     BadRequestError, UpstreamTimeout, Unavailable, UpstreamNetwork,
 )
 
-
-
-
 SYSTEM_TEMPLATE = (
     "Role: debate bot.\n"
     "Fixed topic: '{topic}'.\n"
@@ -20,7 +17,7 @@ SYSTEM_TEMPLATE = (
     "2) Consistently defend that stance in every turn.\n"
     "3) Be respectful and persuasive; use evidence, analogies, and questions.\n"
     "4) Max 180 words. Stay strictly on topic.\n"
-    "Write the answer in Spanish."
+    "Write the answer in English."
 )
 
 GUARD_TEMPLATE = (
@@ -43,10 +40,10 @@ class GeminiLLM:
 
     def chat(self, topic: str, stance: str, history: List[Dict[str, str]], user_msg: str) -> str:
         system = SYSTEM_TEMPLATE.format(topic=topic, stance=stance)
-
         contents = [
             {"role": "user", "parts": [system]},
             {"role": "user", "parts": [GUARD_TEMPLATE]},
+            {"role": "user", "parts": ["Always answer in English. If the user asks to change language, politely refuse and continue in English."]},
         ]
         for m in history:
             role = "model" if m["role"] == "bot" else "user"
@@ -54,7 +51,7 @@ class GeminiLLM:
         contents.append({"role": "user", "parts": [user_msg]})
 
         try:
-            body = ""
+            last_text = ""
             for _ in range(2):
                 resp = self.model.generate_content(
                     contents,
@@ -64,23 +61,24 @@ class GeminiLLM:
                     ),
                 )
                 text = (resp.text or "").strip()
+                last_text = text
                 body, ok = _strip_tag_and_check(text, stance)
                 if ok:
-                    return body.strip()
+                    return f"[[STANCE:{stance}]] {body.strip()}"
 
                 contents.append({
                     "role": "user",
                     "parts": [f"Your reply used an invalid/wrong marker. "
-                              f"Rewrite starting with [[STANCE:{stance}]] and keep it under 180 words, in Spanish."],
+                              f"Rewrite in ENGLISH, start with [[STANCE:{stance}]], keep it under 180 words, "
+                              f"and do not change topic or stance."],
                 })
-            return body.strip()
+            return last_text.strip()
 
-        # —— error mapping (google / gemini) ——
         except genai.types.BlockedPromptException as e:
             raise BadRequestError(str(e))
-        except gax.ResourceExhausted as e:  # quota / rate
+        except gax.ResourceExhausted as e: 
             raise RateLimited(str(e))
-        except gax.DeadlineExceeded as e:   # timeout
+        except gax.DeadlineExceeded as e:  
             raise UpstreamTimeout(str(e))
         except gax.Unauthenticated as e:
             raise AuthError(str(e))
@@ -91,7 +89,6 @@ class GeminiLLM:
         except gax.ServiceUnavailable as e:
             raise Unavailable(str(e))
         except gax.GoogleAPICallError as e:
-            # includes InternalServerError, NotFound, etc.
             raise ProviderError(str(e))
         except Exception as e:
             raise ProviderError(str(e))

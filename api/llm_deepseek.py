@@ -17,7 +17,7 @@ SYSTEM_TEMPLATE = (
     "2) Consistently defend that stance in every turn.\n"
     "3) Be respectful and persuasive; use evidence, analogies, and questions.\n"
     "4) Max 180 words. Stay strictly on topic.\n"
-    "Write the answer in Spanish."
+    "Write the answer in English."
 )
 
 GUARD_TEMPLATE = (
@@ -27,7 +27,7 @@ GUARD_TEMPLATE = (
 
 def _strip_tag_and_check(text: str, stance: str) -> Tuple[str, bool]:
     t = (text or "").strip()
-    m = re.match(r"\s*\[\[STANCE\s*:\s*([^\]]+)\]\]\s*", t, re.I)  
+    m = re.match(r"\s*\[\[STANCE\s*:\s*([^\]]+)\]\]\s*", t, re.I)
     declared = m.group(1).lower().strip() if m else None
     body = t[m.end():].lstrip() if m else t
     ok = declared in {"pro", "contra"} and declared == stance
@@ -43,6 +43,7 @@ class DeepSeekLLM:
         msgs = [
             {"role": "system", "content": SYSTEM_TEMPLATE.format(topic=topic, stance=stance)},
             {"role": "system", "content": GUARD_TEMPLATE},
+            {"role": "system", "content": "Always answer in English. If the user asks to change language, politely refuse and continue in English."},
         ]
         for m in history:
             role = "assistant" if m["role"] == "bot" else "user"
@@ -50,28 +51,29 @@ class DeepSeekLLM:
         msgs.append({"role": "user", "content": user_msg})
 
         try:
-            body = ""
+            last_text = ""
             for _ in range(2):
                 comp = self.client.chat.completions.create(
                     model=self.model,
                     messages=msgs,
                     temperature=0.2,
                     max_tokens=256,
-                    timeout=30,
                 )
                 text = (comp.choices[0].message.content or "").strip()
+                last_text = text
                 body, ok = _strip_tag_and_check(text, stance)
                 if ok:
-                    return body.strip()
+                    return f"[[STANCE:{stance}]] {body.strip()}"
 
                 msgs.append({
                     "role": "user",
                     "content": (
                         f"Your previous reply used an invalid or wrong marker. "
-                        f"Rewrite starting with [[STANCE:{stance}]] and keep it under 180 words, in Spanish."
+                        f"Rewrite in ENGLISH, start with [[STANCE:{stance}]], keep it under 180 words, "
+                        f"and do not change topic or stance."
                     ),
                 })
-            return body.strip()
+            return last_text.strip()
 
         except openai_pkg.RateLimitError as e:
             raise RateLimited(str(e))
@@ -87,18 +89,12 @@ class DeepSeekLLM:
             raise UpstreamNetwork(str(e))
         except openai_pkg.APIStatusError as e:
             sc = getattr(e, "status_code", None)
-            if sc == 429:
-                raise RateLimited(str(e))
-            if sc == 401:
-                raise AuthError(str(e))
-            if sc == 403:
-                raise PermissionError(str(e))
-            if sc in (500, 502):
-                raise Unavailable(str(e))
-            if sc == 503:
-                raise Unavailable(str(e))
-            if sc == 504:
-                raise UpstreamTimeout(str(e))
+            if sc == 429: raise RateLimited(str(e))
+            if sc == 401: raise AuthError(str(e))
+            if sc == 403: raise PermissionError(str(e))
+            if sc in (500, 502): raise Unavailable(str(e))
+            if sc == 503: raise Unavailable(str(e))
+            if sc == 504: raise UpstreamTimeout(str(e))
             raise ProviderError(str(e))
         except Exception as e:
             raise ProviderError(str(e))
