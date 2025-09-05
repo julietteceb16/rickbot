@@ -15,7 +15,7 @@ load_dotenv()
 app = FastAPI(title="Debate Bot API")
 
 from fastapi.middleware.cors import CORSMiddleware
-
+# --- CORS setup (only allow local dev origins)
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:8081",
     "http://localhost:8081",
@@ -27,13 +27,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],  
 )
-
+# Serve static UI (index.html, assets, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
 def root():
     return FileResponse("static/index.html")
-
+# --- Storage choice: memory vs DB
 use_db = os.getenv("USE_DB", "0") == "1"
 
 if use_db:
@@ -47,7 +47,7 @@ else:
     from api.storage_memory import InMemoryConversationStore
     _store = InMemoryConversationStore()
 
-
+# --- LLM providers wiring
 _llms = {}
 
 # Gemini
@@ -79,10 +79,11 @@ if deepseek_key:
 
 if not _llms:
     raise RuntimeError("No LLM providers configured. Set GEMINI_API_KEY, OPENAI_API_KEY or DEEPSEEK_API_KEY.")
-
+# Pick default provider: env var first, fallback to Gemini or first available
 default_provider = os.getenv("DEFAULT_PROVIDER") or ("gemini" if "gemini" in _llms else next(iter(_llms)))
 _service = ConversationService(store=_store, llms=_llms, default_provider=default_provider)
 
+# --- API endpoints
 @app.post("/conversation", response_model=ConversationOut)
 def conversation(
     payload: ConversationIn,
@@ -91,7 +92,7 @@ def conversation(
 ):
     provider = None
     stance_hint = None
-
+    # Only allow provider/stance headers at conversation bootstrap
     if payload.conversation_id is None:
         if x_llm_provider:
             provider = x_llm_provider.strip().lower()
