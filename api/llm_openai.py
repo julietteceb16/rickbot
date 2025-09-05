@@ -8,6 +8,7 @@ from api.errors import (
     BadRequestError, UpstreamTimeout, Unavailable, UpstreamNetwork,
 )
 
+# Prompt contract: single role + hard caps to keep the model on-rails.
 SYSTEM_TEMPLATE = (
     "Role: debate bot.\n"
     "Fixed topic: '{topic}'.\n"
@@ -20,6 +21,7 @@ SYSTEM_TEMPLATE = (
     "Write the answer in English."
 )
 
+# Extra guardrail to avoid malformed stance tokens from the model.
 GUARD_TEMPLATE = (
     "Critical guard: The stance marker MUST be exactly one of: [[STANCE:pro]] or [[STANCE:contra]]. "
     "Any other token (e.g., [[STANCE:st]]) is invalid and you must rewrite immediately."
@@ -73,7 +75,7 @@ class OpenAILLM:
                     ),
                 })
             return last_text.strip()
-
+# Error mapping: convert OpenAI SDK exceptions to our domain errors.
         except openai_pkg.RateLimitError as e:
             raise RateLimited(str(e))
         except openai_pkg.AuthenticationError as e:
