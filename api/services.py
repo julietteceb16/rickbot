@@ -8,8 +8,7 @@ HISTORY_CAP = 10
 class ConversationNotFound(Exception):
     pass
 
-
-# --- Helpers ---------------------------------------------------------------
+ 
 
 def _normalize_marker(text: str, stance: str) -> str:
     """
@@ -18,7 +17,7 @@ def _normalize_marker(text: str, stance: str) -> str:
     """
     t = (text or "").strip()
 
-    # Corrige si vino el marcador contrario
+    # Fix if the wrong marker came from the model
     if re.match(r"^\s*\[\[STANCE\s*:\s*contra\]\]\s*", t, re.I) and stance == "pro":
         t = re.sub(r"^\s*\[\[STANCE\s*:\s*contra\]\]\s*", f"[[STANCE:{stance}]] ", t, flags=re.I)
         return t.strip()
@@ -26,7 +25,7 @@ def _normalize_marker(text: str, stance: str) -> str:
         t = re.sub(r"^\s*\[\[STANCE\s*:\s*pro\]\]\s*", f"[[STANCE:{stance}]] ", t, flags=re.I)
         return t.strip()
 
-    # Agrega si falta
+     # Add it if missing
     if not re.match(r"^\s*\[\[STANCE\s*:\s*(pro|contra)\]\]\s*", t, re.I):
         t = f"[[STANCE:{stance}]] " + t
 
@@ -58,12 +57,13 @@ def _seems_english(text: str) -> bool:
     return en_hits >= es_hits
 
 
-# --- Servicio --------------------------------------------------------------
+
 
 class ConversationService:
     def __init__(self, store: InMemoryConversationStore, llms: Dict[str, object], default_provider: str = "gemini") -> None:
         self.store = store
         self.llms = llms
+         # If the given default provider is invalid, pick the first available one
         self.default_provider = default_provider if default_provider in llms else next(iter(llms))
 
     def _bootstrap(self, opening_msg: str, provider: Optional[str], stance: Optional[str]) -> Tuple[str, ConversationState]:
@@ -72,6 +72,7 @@ class ConversationService:
             raise ValueError(f"unsupported provider: {prov}")
         st = stance if stance in {"pro", "contra"} else "pro"
 
+        # First message defines the topic and stance
         cid = self.store.new_id()
         state: ConversationState = {
             "topic": opening_msg,   # el primer mensaje define el tema
@@ -101,7 +102,7 @@ class ConversationService:
 
         llm = self.llms[state["provider"]]
 
-        # 1) Llamada al LLM
+        #Ask the LLM for a reply
         bot_raw = llm.chat(
             topic=state["topic"],
             stance=state["stance"],
@@ -109,11 +110,11 @@ class ConversationService:
             user_msg=user_msg
         )
 
-        # 2) Normaliza marcador y trunca
+        #Normalize stance marker and enforce word limit
         bot_norm = _normalize_marker(bot_raw, state["stance"])
         bot_norm = _truncate_words(bot_norm, 180)
 
-        # 3) ENFORCE ENGLISH: si huele a español, hacemos un segundo intento duro
+        # Ensure response is English, retry if needed
         if not _seems_english(bot_norm):
             hard_user_msg = (
                 user_msg
@@ -130,7 +131,7 @@ class ConversationService:
             bot_norm = _normalize_marker(bot_retry, state["stance"])
             bot_norm = _truncate_words(bot_norm, 180)
 
-            # Fallback ultra-conservador (raro que se necesite)
+            #  Fallback if still not English
             if not _seems_english(bot_norm):
                 bot_norm = (
                     f"[[STANCE:{state['stance']}]] I must reply in English and keep the fixed stance on "
@@ -138,7 +139,7 @@ class ConversationService:
                 )
                 bot_norm = _truncate_words(bot_norm, 180)
 
-        # 4) Banner visible solo en el primer turno
+        # Add banner only on the first turn
         if first_turn:
             banner = _opening_banner(state["topic"], state["stance"])
             if banner.lower() not in bot_norm.lower():
@@ -149,7 +150,7 @@ class ConversationService:
                 )
             bot_norm = _truncate_words(bot_norm, 180)  # re-trunca por si creció
 
-        # 5) Persistencia de historial (5 turnos recientes => 10 items)
+        #Save history (keep only last 10 entries)
         state["history"].extend([
             {"role": "user", "message": user_msg},
             {"role": "bot",  "message": bot_norm},
