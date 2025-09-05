@@ -2,7 +2,7 @@ import re
 from api.services import ConversationService
 from api.storage_memory import InMemoryConversationStore
 
-
+# Minimal fake LLM to control outputs in tests
 class FakeLLM:
     def __init__(self, script=None):
         self.script = script or []
@@ -15,6 +15,7 @@ class FakeLLM:
         self.calls += 1
         return out
 
+# Helpers reused across assertions
 def is_english(s: str) -> bool:
     low = (s or "").lower()
     if re.search(r"[áéíóúñ¡¿]", low):
@@ -26,11 +27,14 @@ def is_english(s: str) -> bool:
 def words_count(s): return len((s or "").split())
 
 def new_service(script=None):
+    # Creates a ConversationService wired with FakeLLM
     store = InMemoryConversationStore()
     llms = {"fake": FakeLLM(script=script)}
     return ConversationService(store=store, llms=llms, default_provider="fake")
 
+#  Tests
 def test_first_turn_banner_marker_english():
+    # Model output misses marker and contains Spanish → service should fix it
     svc = new_service(script=["No marker here; maybe español."])
     cid, hist = svc.handle(None, 'The Earth is flat', stance="pro")
     bot = hist[-1]["message"]
@@ -40,6 +44,7 @@ def test_first_turn_banner_marker_english():
     assert words_count(bot) <= 180
 
 def test_history_cap_and_order():
+     # Verify that history is trimmed to last 5 turns (10 messages)
     svc = new_service()
     cid, _ = svc.handle(None, 'The Earth is flat', stance="pro")
     for i in range(6):  # 6 turnos => 12 mensajes
@@ -49,6 +54,7 @@ def test_history_cap_and_order():
     assert hist[-1]["message"].startswith("[[STANCE:pro]]")
 
 def test_force_english_if_user_requests_spanish():
+    # First reply is Spanish, second retry must enforce English
     svc = new_service(script=[
         '[[STANCE:pro]] Respuesta en español con acentos.',
         '[[STANCE:pro]] Second attempt in English.'
